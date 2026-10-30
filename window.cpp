@@ -253,10 +253,13 @@ void Window::paintEvent(QPaintEvent *) {
     painter.restore();
 
     painter.setPen(Qt::black);
-    char info[256];
+    
     double f_max_abs = max(abs(min_y), abs(max_y));
-    snprintf(info, sizeof(info), "k=%d %s | n=%d | zoom=%d | p=%d | max|F|=%f", 
-             func_id, f_name.c_str(), n, zoom_s, p_perturb, f_max_abs);
+    const char *metric_name = (display_mode == 3) ? "Error" : "F";
+    
+    char info[256];
+    snprintf(info, sizeof(info), "k=%d %s | n=%d | zoom=%d | p=%d | max|%s|=%.6e", 
+             func_id, f_name.c_str(), n, zoom_s, p_perturb, metric_name, f_max_abs);
     painter.drawText(10, 20, info);
     
     const char *mode_str = "";
@@ -265,4 +268,12 @@ void Window::paintEvent(QPaintEvent *) {
     else if (display_mode == 2) mode_str = "Mode: Exact + Bessel + Spline";
     else if (display_mode == 3) mode_str = "Mode: Errors";
     painter.drawText(10, 40, mode_str);
+
+    static int last_func = -1, last_mode = -1, last_n = -1, last_zoom = -999, last_p = -999;
+    if (func_id != last_func || display_mode != last_mode || n != last_n || zoom_s != last_zoom || p_perturb != last_p) {
+        printf("k=%d | Mode=%d | n=%d | zoom=%d | p=%d | max|%s| = %e\n", 
+               func_id, display_mode, n, zoom_s, p_perturb, metric_name, f_max_abs);
+        fflush(stdout);
+        last_func = func_id; last_mode = display_mode; last_n = n; last_zoom = zoom_s; last_p = p_perturb;
+    }
 }
