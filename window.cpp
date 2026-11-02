@@ -80,7 +80,7 @@ void Window::update_data() {
     for (int i = 0; i < n; ++i) {
         x_arr[i] = a + i * step;
         f_arr[i] = f_exact(x_arr[i]);
-        if (abs(f_arr[i]) > max_f) max_f = abs(f_arr[i]);
+        if (fabs(f_arr[i]) > max_f) max_f = fabs(f_arr[i]);
     }
 
     if (p_perturb != 0) {
@@ -89,11 +89,11 @@ void Window::update_data() {
 
     a_bessel.assign(4 * (n - 1), 0.0);
     extra_bessel.assign(n, 0.0);
-    bessel_init(n, x_arr.data(), f_arr.data(), a_bessel.data(), extra_bessel.data(), d2f_exact(a), d2f_exact(b));
+    bessel_init(n, &x_arr[0], &f_arr[0], &a_bessel[0], &extra_bessel[0], d2f_exact(a), d2f_exact(b));
 
     a_spline.assign(4 * (n - 1), 0.0);
     extra_spline.assign(2 * n, 0.0);
-    spline_init(n, x_arr.data(), f_arr.data(), a_spline.data(), extra_spline.data(), d2f_exact(a), d2f_exact(b));
+    spline_init(n, &x_arr[0], &f_arr[0], &a_spline[0], &extra_spline.data()[0], d2f_exact(a), d2f_exact(b));
 }
 
 void Window::keyPressEvent(QKeyEvent *event) {
@@ -145,54 +145,67 @@ void Window::paintEvent(QPaintEvent *) {
     double draw_a = mid - half_width;
     double draw_b = mid + half_width;
 
-    double min_y = 1e9, max_y = -1e9;
     int pixels = width();
     
-    ApproxFunction f_bessel(a, b, n, x_arr.data(), a_bessel.data(), bessel_compute);
-    ApproxFunction f_spline(a, b, n, x_arr.data(), a_spline.data(), spline_compute);
+    ApproxFunction f_bessel(a, b, n, &x_arr[0], &a_bessel[0], bessel_compute);
+    ApproxFunction f_spline(a, b, n, &x_arr[0], &a_spline[0], spline_compute);
 
     vector<double> val_exact(pixels);
     vector<double> val_bessel(pixels);
     vector<double> val_spline(pixels);
 
+    double min_y = 1e300, max_y = -1e300;
+    double max_err_bessel = 0.0;
+    double max_err_spline = 0.0;
+
     for (int px = 0; px < pixels; ++px) {
         double math_x = draw_a + px * (draw_b - draw_a) / (pixels - 1);
         val_exact[px] = f_exact(math_x);
-        
-        if (n <= 50 || display_mode == 3) {
-            val_bessel[px] = f_bessel.compute(math_x);
-        }
         val_spline[px] = f_spline.compute(math_x);
 
-        double current_y = val_exact[px];
-        if (display_mode == 0 && n <= 50) current_y = val_bessel[px];
-        else if (display_mode == 1) current_y = val_spline[px];
-        else if (display_mode == 2) {
-            current_y = max(val_exact[px], val_spline[px]);
-            if (n <= 50) current_y = max(current_y, val_bessel[px]);
+        double err_s = fabs(val_exact[px] - val_spline[px]);
+        if (err_s > max_err_spline) max_err_spline = err_s;
+
+        double err_b = 0.0;
+        if (n <= 50) {
+            val_bessel[px] = f_bessel.compute(math_x);
+            err_b = fabs(val_exact[px] - val_bessel[px]);
+            if (err_b > max_err_bessel) max_err_bessel = err_b;
+        }
+
+        if (display_mode == 0) {
+            min_y = min(min_y, val_exact[px]);
+            max_y = max(max_y, val_exact[px]);
+            if (n <= 50) {
+                min_y = min(min_y, val_bessel[px]);
+                max_y = max(max_y, val_bessel[px]);
+            }
+        } else if (display_mode == 1) {
+            min_y = min(min_y, min(val_exact[px], val_spline[px]));
+            max_y = max(max_y, max(val_exact[px], val_spline[px]));
+        } else if (display_mode == 2) {
+            min_y = min(min_y, min(val_exact[px], val_spline[px]));
+            max_y = max(max_y, max(val_exact[px], val_spline[px]));
+            if (n <= 50) {
+                min_y = min(min_y, val_bessel[px]);
+                max_y = max(max_y, val_bessel[px]);
+            }
         } else if (display_mode == 3) {
-            double err_s = abs(val_exact[px] - val_spline[px]);
             min_y = min(min_y, err_s);
             max_y = max(max_y, err_s);
             if (n <= 50) {
-                double err_b = abs(val_exact[px] - val_bessel[px]);
                 min_y = min(min_y, err_b);
                 max_y = max(max_y, err_b);
             }
-            continue;
-        }
-
-        if (display_mode != 3) {
-            min_y = min(min_y, current_y);
-            max_y = max(max_y, current_y);
-            min_y = min(min_y, val_exact[px]);
-            max_y = max(max_y, val_exact[px]);
         }
     }
 
-    if (max_y - min_y < 1e-6) {
-        max_y += 0.1;
-        min_y -= 0.1;
+    double true_max_abs = max(fabs(min_y), fabs(max_y));
+
+    if (max_y - min_y < 1e-12) {
+        double pad = (true_max_abs > 1e-12) ? 0.1 * true_max_abs : 1e-6;
+        max_y += pad;
+        min_y -= pad;
     }
 
     double delta_y = 0.05 * (max_y - min_y);
@@ -241,25 +254,26 @@ void Window::paintEvent(QPaintEvent *) {
         if (display_mode == 3) {
             if (n <= 50) {
                 painter.setPen(pen_bessel);
-                painter.drawLine(QPointF(x1, abs(val_exact[px] - val_bessel[px])), 
-                                 QPointF(x2, abs(val_exact[px+1] - val_bessel[px+1])));
+                painter.drawLine(QPointF(x1, fabs(val_exact[px] - val_bessel[px])), 
+                                 QPointF(x2, fabs(val_exact[px+1] - val_bessel[px+1])));
             }
             painter.setPen(pen_spline);
-            painter.drawLine(QPointF(x1, abs(val_exact[px] - val_spline[px])), 
-                             QPointF(x2, abs(val_exact[px+1] - val_spline[px+1])));
+            painter.drawLine(QPointF(x1, fabs(val_exact[px] - val_spline[px])), 
+                             QPointF(x2, fabs(val_exact[px+1] - val_spline[px+1])));
         }
     }
 
     painter.restore();
 
     painter.setPen(Qt::black);
-    
-    double f_max_abs = max(abs(min_y), abs(max_y));
-    const char *metric_name = (display_mode == 3) ? "Error" : "F";
-    
     char info[256];
-    snprintf(info, sizeof(info), "k=%d %s | n=%d | zoom=%d | p=%d | max|%s|=%.6e", 
-             func_id, f_name.c_str(), n, zoom_s, p_perturb, metric_name, f_max_abs);
+    if (n <= 50) {
+        snprintf(info, sizeof(info), "k=%d %s | n=%d | zoom=%d | p=%d | max|F|=%.4e | Err_B=%.4e | Err_S=%.4e",
+                 func_id, f_name.c_str(), n, zoom_s, p_perturb, true_max_abs, max_err_bessel, max_err_spline);
+    } else {
+        snprintf(info, sizeof(info), "k=%d %s | n=%d | zoom=%d | p=%d | max|F|=%.4e | Err_S=%.4e",
+                 func_id, f_name.c_str(), n, zoom_s, p_perturb, true_max_abs, max_err_spline);
+    }
     painter.drawText(10, 20, info);
     
     const char *mode_str = "";
@@ -271,8 +285,7 @@ void Window::paintEvent(QPaintEvent *) {
 
     static int last_func = -1, last_mode = -1, last_n = -1, last_zoom = -999, last_p = -999;
     if (func_id != last_func || display_mode != last_mode || n != last_n || zoom_s != last_zoom || p_perturb != last_p) {
-        printf("k=%d | Mode=%d | n=%d | zoom=%d | p=%d | max|%s| = %e\n", 
-               func_id, display_mode, n, zoom_s, p_perturb, metric_name, f_max_abs);
+        printf("%s | %s\n", info, mode_str);
         fflush(stdout);
         last_func = func_id; last_mode = display_mode; last_n = n; last_zoom = zoom_s; last_p = p_perturb;
     }
